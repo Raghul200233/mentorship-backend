@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      String   // "mentor" or "student"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessionsAsMentor Session[] @relation("MentorSessions")
+  sessionsAsStudent Session[] @relation("StudentSessions")
+  messages         Message[]
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  mentorId    String
+  studentId   String?
+  status      String   @default("waiting") // waiting, active, ended
+  codeContent String?  @default("// Start coding here...\n\nfunction hello() {\n  console.log(\"Hello, World!\");\n}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  endedAt     DateTime?
+
+  mentor   User   @relation("MentorSessions", fields: [mentorId], references: [id])
+  student  User?  @relation("StudentSessions", fields: [studentId], references: [id])
+  messages Message[]
+
+  @@index([mentorId])
+  @@index([studentId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  sessionId String
+  userId    String
+  text      String
+  createdAt DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([sessionId])
+}
