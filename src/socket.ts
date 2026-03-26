@@ -106,8 +106,9 @@ export function setupSocket(io: Server) {
     // Handle end call
 socket.on('end-call', ({ sessionId: sessId }) => {
   try {
-    socket.to(sessId).emit('call-ended');
-    console.log(`Call ended in session ${sessId}`);
+    // Notify the peer that the call ended, but don't force end their call
+    socket.to(sessId).emit('peer-ended-call');
+    console.log(`User ${userId} ended their call in session ${sessId}`);
   } catch (error) {
     console.error('End call error:', error);
   }
