@@ -103,16 +103,15 @@ export function setupSocket(io: Server) {
       }
     });
     
-    // Handle end call
-socket.on('end-call', ({ sessionId: sessId }) => {
-  try {
-    // Notify the peer that the call ended, but don't force end their call
-    socket.to(sessId).emit('peer-ended-call');
-    console.log(`User ${userId} ended their call in session ${sessId}`);
-  } catch (error) {
-    console.error('End call error:', error);
-  }
-});
+    // Handle end call - only notify peer, don't force end their call
+    socket.on('end-call', ({ sessionId: sessId }) => {
+      try {
+        socket.to(sessId).emit('peer-ended-call');
+        console.log(`User ${userId} ended their call in session ${sessId}`);
+      } catch (error) {
+        console.error('End call error:', error);
+      }
+    });
     
     socket.on('disconnect', () => {
       console.log(`User ${userId} disconnected from session ${sessionId}`);
