@@ -1,5 +1,4 @@
 import { Server, Socket } from 'socket.io'
-import { supabase } from './index'
 
 interface CustomSocket extends Socket {
   sessionId?: string;
@@ -30,27 +29,14 @@ export function setupSocket(io: Server) {
       return;
     }
     
-    console.log(`User ${userId} connected to session ${sessionId}`);
+    console.log(`✅ User ${userId} connected to session ${sessionId}`);
     socket.join(sessionId);
     
     // Handle chat messages
-    socket.on('chat-message', async ({ sessionId: sessId, message }) => {
+    socket.on('chat-message', ({ sessionId: sessId, message }) => {
       try {
         if (sessId !== sessionId) return;
-        
-        const { error } = await supabase
-          .from('messages')
-          .insert({
-            session_id: sessId,
-            user_id: message.userId,
-            text: message.text
-          });
-        
-        if (error) {
-          console.error('Error saving message:', error);
-          return;
-        }
-        
+        console.log(`💬 Message in session ${sessId}:`, message.text);
         io.to(sessionId).emit('chat-message', message);
       } catch (error) {
         console.error('Chat message error:', error);
@@ -58,20 +44,9 @@ export function setupSocket(io: Server) {
     });
     
     // Handle code updates
-    socket.on('code-update', async ({ sessionId: sessId, code, language }) => {
+    socket.on('code-update', ({ sessionId: sessId, code, language }) => {
       try {
         if (sessId !== sessionId) return;
-        
-        const { error } = await supabase
-          .from('sessions')
-          .update({ code_content: code })
-          .eq('id', sessId);
-        
-        if (error) {
-          console.error('Error updating code:', error);
-          return;
-        }
-        
         socket.to(sessionId).emit('code-update', { code, language });
       } catch (error) {
         console.error('Code update error:', error);
@@ -81,6 +56,7 @@ export function setupSocket(io: Server) {
     // WebRTC signaling
     socket.on('webrtc-offer', ({ sessionId: sessId, offer }) => {
       try {
+        console.log(`📞 Offer from ${userId} in session ${sessId}`);
         socket.to(sessId).emit('webrtc-offer', { offer, fromUserId: userId });
       } catch (error) {
         console.error('WebRTC offer error:', error);
@@ -89,6 +65,7 @@ export function setupSocket(io: Server) {
     
     socket.on('webrtc-answer', ({ sessionId: sessId, answer }) => {
       try {
+        console.log(`📞 Answer from ${userId} in session ${sessId}`);
         socket.to(sessId).emit('webrtc-answer', { answer });
       } catch (error) {
         console.error('WebRTC answer error:', error);
@@ -103,18 +80,18 @@ export function setupSocket(io: Server) {
       }
     });
     
-    // Handle end call - only notify peer, don't force end their call
+    // Handle end call - only notify peer
     socket.on('end-call', ({ sessionId: sessId }) => {
       try {
+        console.log(`📞 Call ended by ${userId} in session ${sessId}`);
         socket.to(sessId).emit('peer-ended-call');
-        console.log(`User ${userId} ended their call in session ${sessId}`);
       } catch (error) {
         console.error('End call error:', error);
       }
     });
     
     socket.on('disconnect', () => {
-      console.log(`User ${userId} disconnected from session ${sessionId}`);
+      console.log(`❌ User ${userId} disconnected from session ${sessionId}`);
     });
   });
 }
