@@ -24,7 +24,6 @@ export function setupSocket(io: Server) {
     const userId = socket.userId;
     
     if (!sessionId || !userId) {
-      console.log('Missing sessionId or userId');
       socket.disconnect();
       return;
     }
@@ -32,66 +31,47 @@ export function setupSocket(io: Server) {
     console.log(`✅ User ${userId} connected to session ${sessionId}`);
     socket.join(sessionId);
     
-    // Handle chat messages
+    // Chat messages
     socket.on('chat-message', ({ sessionId: sessId, message }) => {
-      try {
-        if (sessId !== sessionId) return;
-        console.log(`💬 Message in session ${sessId}:`, message.text);
-        io.to(sessionId).emit('chat-message', message);
-      } catch (error) {
-        console.error('Chat message error:', error);
-      }
+      if (sessId !== sessionId) return;
+      io.to(sessionId).emit('chat-message', message);
     });
     
-    // Handle code updates
+    // Code updates
     socket.on('code-update', ({ sessionId: sessId, code, language }) => {
-      try {
-        if (sessId !== sessionId) return;
-        socket.to(sessionId).emit('code-update', { code, language });
-      } catch (error) {
-        console.error('Code update error:', error);
-      }
+      if (sessId !== sessionId) return;
+      socket.to(sessionId).emit('code-update', { code, language });
     });
     
-    // WebRTC signaling
+    // WebRTC - Offer
     socket.on('webrtc-offer', ({ sessionId: sessId, offer }) => {
-      try {
-        console.log(`📞 Offer from ${userId} in session ${sessId}`);
-        socket.to(sessId).emit('webrtc-offer', { offer, fromUserId: userId });
-      } catch (error) {
-        console.error('WebRTC offer error:', error);
-      }
+      if (sessId !== sessionId) return;
+      console.log(`📞 Offer from ${userId}`);
+      socket.to(sessId).emit('webrtc-offer', { offer, fromUserId: userId });
     });
     
+    // WebRTC - Answer
     socket.on('webrtc-answer', ({ sessionId: sessId, answer }) => {
-      try {
-        console.log(`📞 Answer from ${userId} in session ${sessId}`);
-        socket.to(sessId).emit('webrtc-answer', { answer });
-      } catch (error) {
-        console.error('WebRTC answer error:', error);
-      }
+      if (sessId !== sessionId) return;
+      console.log(`📞 Answer from ${userId}`);
+      socket.to(sessId).emit('webrtc-answer', { answer });
     });
     
+    // WebRTC - ICE Candidate
     socket.on('webrtc-ice-candidate', ({ sessionId: sessId, candidate }) => {
-      try {
-        socket.to(sessId).emit('webrtc-ice-candidate', { candidate });
-      } catch (error) {
-        console.error('WebRTC ICE candidate error:', error);
-      }
+      if (sessId !== sessionId) return;
+      socket.to(sessId).emit('webrtc-ice-candidate', { candidate });
     });
     
-    // Handle end call - only notify peer
+    // End call
     socket.on('end-call', ({ sessionId: sessId }) => {
-      try {
-        console.log(`📞 Call ended by ${userId} in session ${sessId}`);
-        socket.to(sessId).emit('peer-ended-call');
-      } catch (error) {
-        console.error('End call error:', error);
-      }
+      if (sessId !== sessionId) return;
+      console.log(`📞 Call ended by ${userId}`);
+      socket.to(sessId).emit('peer-ended-call');
     });
     
     socket.on('disconnect', () => {
-      console.log(`❌ User ${userId} disconnected from session ${sessionId}`);
+      console.log(`❌ User ${userId} disconnected`);
     });
   });
 }
