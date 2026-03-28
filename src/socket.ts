@@ -31,9 +31,13 @@ export function setupSocket(io: Server) {
     console.log(`✅ User ${userId} connected to session ${sessionId}`);
     socket.join(sessionId);
     
+    // Notify others that user joined
+    socket.to(sessionId).emit('user-joined', { userId });
+    
     // Chat messages
     socket.on('chat-message', ({ sessionId: sessId, message }) => {
       if (sessId !== sessionId) return;
+      console.log(`💬 Message in ${sessId}:`, message.text);
       io.to(sessionId).emit('chat-message', message);
     });
     
@@ -71,7 +75,8 @@ export function setupSocket(io: Server) {
     });
     
     socket.on('disconnect', () => {
-      console.log(`❌ User ${userId} disconnected`);
+      console.log(`❌ User ${userId} disconnected from session ${sessionId}`);
+      socket.to(sessionId).emit('user-left', { userId });
     });
   });
 }
