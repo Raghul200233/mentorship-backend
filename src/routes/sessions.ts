@@ -39,6 +39,8 @@ router.get('/', verifyToken, async (req: AuthRequest, res: Response): Promise<vo
 router.post('/', verifyToken, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     console.log('🚀 Creating session for mentor:', req.user?.id)
+    console.log('User email:', req.user?.email)
+    console.log('User metadata:', req.user?.user_metadata)
     
     // First, ensure profile exists
     const { data: existingProfile, error: profileCheckError } = await supabase
@@ -74,6 +76,7 @@ router.post('/', verifyToken, async (req: AuthRequest, res: Response): Promise<v
     }
     
     // Create the session
+    console.log('📝 Creating session...')
     const { data: session, error } = await supabase
       .from('sessions')
       .insert({

@@ -8,24 +8,43 @@ const supabase = createClient(
 
 export async function verifyToken(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '')
+    const authHeader = req.headers.authorization
     
-    if (!token) {
+    if (!authHeader) {
+      console.log('No authorization header')
       res.status(401).json({ error: 'No token provided' })
       return
     }
     
-    const { data: { user }, error } = await supabase.auth.getUser(token)
+    const token = authHeader.replace('Bearer ', '')
     
-    if (error || !user) {
-      res.status(401).json({ error: 'Invalid token' })
+    if (!token) {
+      console.log('Invalid token format')
+      res.status(401).json({ error: 'Invalid token format' })
       return
     }
     
-    (req as any).user = user
-    next()
-  } catch (error) {
+    console.log('Verifying token:', token.substring(0, 20) + '...')
+    
+    const { data: { user }, error } = await supabase.auth.getUser(token)
+    
+    if (error) {
+      console.error('Token verification error:', error.message)
+      res.status(401).json({ error: 'Invalid token', details: error.message })
+      return
+    }
+    
+    if (!user) {
+      console.log('No user found for token')
+      res.status(401).json({ error: 'User not found' })
+      return
+    }
+    
+    console.log('Token verified for user:', user.id);
+    (req as any).user = user;
+    next();
+  } catch (error: any) {
     console.error('Auth middleware error:', error)
-    res.status(500).json({ error: 'Internal server error' })
+    res.status(500).json({ error: 'Internal server error', details: error.message })
   }
 }
