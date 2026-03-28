@@ -17,6 +17,7 @@ const server = http.createServer(app)
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:3000',
   'https://mentorship-frontend.vercel.app',
+  'https://mentorship-frontend-three-tau.vercel.app',
   'https://mentorship-frontend-git-main.vercel.app',
   'http://localhost:3000'
 ].filter(Boolean)
@@ -25,7 +26,8 @@ const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
   },
   transports: ['websocket', 'polling']
 })
@@ -54,7 +56,15 @@ export { supabase }
 
 // Middleware
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true)
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true)
+    } else {
+      console.log('Origin not allowed:', origin)
+      callback(null, false)
+    }
+  },
   credentials: true
 }))
 app.use(express.json())
