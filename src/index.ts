@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js'
 import authRoutes from './routes/auth'
 import sessionRoutes from './routes/sessions'
 import { setupSocket } from './socket'
+import { setupYjsServer } from './yjs-server'
 
 dotenv.config()
 
@@ -18,19 +19,21 @@ const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:3000',
   'https://mentorship-frontend.vercel.app',
   'https://mentorship-frontend-three-tau.vercel.app',
-  'https://mentorship-frontend-git-main.vercel.app',
   'http://localhost:3000'
 ].filter(Boolean)
 
+// Socket.io for chat and video signaling
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
   },
   transports: ['websocket', 'polling']
 })
+
+// Setup Yjs server for CRDT code sync
+setupYjsServer(server)
 
 // Validate environment variables
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
@@ -39,7 +42,7 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
   process.exit(1)
 }
 
-// Initialize Supabase client with service role
+// Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY,
@@ -51,7 +54,6 @@ const supabase = createClient(
   }
 )
 
-// Export supabase for use in other files
 export { supabase }
 
 // Middleware
@@ -78,7 +80,8 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    yjs: 'running',
+    socketio: 'running'
   })
 })
 
@@ -93,15 +96,15 @@ app.get('/test-db', async (req, res) => {
   }
 })
 
-// Socket.io setup
+// Socket.io setup (for chat and video)
 setupSocket(io)
 
 const PORT: number = parseInt(process.env.PORT || '3001', 10)
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n✅ Server running on port ${PORT}`)
-  console.log(`📡 WebSocket server ready`)
-  console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`)
+  console.log(`📡 Socket.io server ready for chat/video`)
+  console.log(`🔗 Yjs WebSocket server ready on ws://localhost:${PORT}/yjs`)
   console.log(`🗄️  Supabase URL: ${process.env.SUPABASE_URL}`)
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}\n`)
 })
