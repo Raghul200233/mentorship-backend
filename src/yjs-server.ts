@@ -34,8 +34,12 @@ export function setupYjsServer(server: any) {
     }
     
     // Send initial document state to new client
-    const update = Y.encodeStateAsUpdate(ydoc)
-    ws.send(update)
+    try {
+      const update = Y.encodeStateAsUpdate(ydoc)
+      ws.send(update)
+    } catch (err) {
+      console.error('Error sending initial state:', err)
+    }
     
     // Handle updates from client
     ws.on('message', (data: Buffer) => {

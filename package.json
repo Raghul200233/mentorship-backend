@@ -6,9 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "clean": "if exist dist rmdir /s /q dist",
-    "prebuild": "npm run clean"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
