@@ -14,7 +14,7 @@ dotenv.config()
 const app = express()
 const server = http.createServer(app)
 
-// Configure CORS for production
+// Configure CORS
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:3000',
   'https://mentorship-frontend.vercel.app',
@@ -37,8 +37,7 @@ setupYjsServer(server)
 
 // Validate environment variables
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-  console.error('❌ Missing required environment variables:')
-  console.error('   SUPABASE_URL and SUPABASE_SERVICE_KEY are required')
+  console.error('❌ Missing required environment variables')
   process.exit(1)
 }
 
@@ -58,15 +57,7 @@ export { supabase }
 
 // Middleware
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true)
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true)
-    } else {
-      console.log('Origin not allowed:', origin)
-      callback(null, false)
-    }
-  },
+  origin: allowedOrigins,
   credentials: true
 }))
 app.use(express.json())
