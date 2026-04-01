@@ -28,8 +28,15 @@ const yjsWss = new WebSocketServer({ server, path: '/yjs' })
 const documents = new Map<string, Y.Doc>()
 
 yjsWss.on('connection', (ws, req) => {
+  // Get sessionId from URL query parameter
   const url = new URL(req.url!, `http://${req.headers.host}`)
-  const sessionId = url.searchParams.get('sessionId') || 'default'
+  const sessionId = url.searchParams.get('sessionId')
+  
+  if (!sessionId) {
+    console.log('❌ No sessionId provided')
+    ws.close()
+    return
+  }
   
   console.log(`📝 Yjs connected for session: ${sessionId}`)
   
@@ -37,10 +44,12 @@ yjsWss.on('connection', (ws, req) => {
   if (!doc) {
     doc = new Y.Doc()
     documents.set(sessionId, doc)
+    console.log(`📄 Created new document for session: ${sessionId}`)
   }
   
-  // Send initial state
-  ws.send(Buffer.from(Y.encodeStateAsUpdate(doc)))
+  // Send initial state to client
+  const update = Y.encodeStateAsUpdate(doc)
+  ws.send(Buffer.from(update))
   
   ws.on('message', (data: Buffer) => {
     try {
@@ -54,17 +63,31 @@ yjsWss.on('connection', (ws, req) => {
         }
       })
     } catch (err) {
-      console.error('Yjs error:', err)
+      console.error('Yjs update error:', err)
     }
   })
   
   ws.on('close', () => {
     console.log(`📝 Yjs disconnected for session: ${sessionId}`)
-    if (yjsWss.clients.size === 0) {
+    // Check if any clients remain for this session
+    let hasClients = false
+    yjsWss.clients.forEach(client => {
+      if (client !== ws && client.readyState === 1) {
+        const clientUrl = new URL((client as any).url, `http://${req.headers.host}`)
+        const clientSessionId = clientUrl.searchParams.get('sessionId')
+        if (clientSessionId === sessionId) {
+          hasClients = true
+        }
+      }
+    })
+    if (!hasClients) {
       documents.delete(sessionId)
+      console.log(`🗑️ Cleaned up document for session: ${sessionId}`)
     }
   })
 })
+
+console.log('✅ Yjs WebSocket server ready on /yjs')
 
 // Socket.io handlers for chat and video
 const sessions = new Map()
@@ -86,11 +109,6 @@ io.on('connection', (socket) => {
   socket.on('chat-message', ({ message }) => {
     console.log(`💬 ${message.text}`)
     io.to(sessionId).emit('chat-message', message)
-  })
-  
-  // Code updates (fallback, YJS handles main sync)
-  socket.on('code-update', ({ code, language }) => {
-    socket.to(sessionId).emit('code-update', { code, language })
   })
   
   // WebRTC
@@ -139,5 +157,5 @@ const PORT = parseInt(process.env.PORT || '10000', 10)
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n✅ Server running on port ${PORT}`)
   console.log(`📡 Socket.io ready`)
-  console.log(`🔗 Yjs WebSocket ready on /yjs\n`)
+  console.log(`🔗 Yjs WebSocket ready on ws://localhost:${PORT}/yjs?sessionId=xxx\n`)
 })
