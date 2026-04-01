@@ -33,8 +33,9 @@ const io = new Server(server, {
   pingInterval: 25000,
 })
 
-// Store active sessions
+// Store active sessions and users
 const sessions = new Map<string, Set<string>>()
+const userSocketMap = new Map<string, string>() // userId -> socketId
 
 // Socket.io connection handler
 io.on('connection', (socket) => {
@@ -48,6 +49,9 @@ io.on('connection', (socket) => {
   
   console.log(`✅ User ${userId} connected to session ${sessionId}`)
   
+  // Store user socket mapping
+  userSocketMap.set(userId, socket.id)
+  
   // Add to session
   if (!sessions.has(sessionId)) {
     sessions.set(sessionId, new Set())
@@ -55,8 +59,15 @@ io.on('connection', (socket) => {
   sessions.get(sessionId)!.add(userId)
   socket.join(sessionId)
   
-  // Notify others
+  // Get other users in session
+  const otherUsers = Array.from(sessions.get(sessionId)!).filter(id => id !== userId)
+  console.log(`Other users in session:`, otherUsers)
+  
+  // Notify others that user joined
   socket.to(sessionId).emit('user-joined', { userId })
+  
+  // Send list of other users to the new user
+  socket.emit('existing-users', { users: otherUsers })
   
   // Chat messages
   socket.on('chat-message', ({ sessionId: sessId, message }) => {
@@ -71,32 +82,62 @@ io.on('connection', (socket) => {
     socket.to(sessionId).emit('code-update', { code, language })
   })
   
-  // WebRTC signaling
-  socket.on('webrtc-offer', ({ sessionId: sessId, offer }) => {
+  // WebRTC signaling - Offer
+  socket.on('webrtc-offer', ({ sessionId: sessId, offer, targetUserId }) => {
     if (sessId !== sessionId) return
-    console.log(`📞 Offer from ${userId}`)
-    socket.to(sessId).emit('webrtc-offer', { offer, fromUserId: userId })
+    console.log(`📞 Offer from ${userId} to ${targetUserId}`)
+    
+    // Send offer to specific user
+    const targetSocketId = userSocketMap.get(targetUserId)
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc-offer', { offer, fromUserId: userId })
+    } else {
+      // Fallback - broadcast to room
+      socket.to(sessId).emit('webrtc-offer', { offer, fromUserId: userId })
+    }
   })
   
-  socket.on('webrtc-answer', ({ sessionId: sessId, answer }) => {
+  // WebRTC signaling - Answer
+  socket.on('webrtc-answer', ({ sessionId: sessId, answer, targetUserId }) => {
     if (sessId !== sessionId) return
-    console.log(`📞 Answer from ${userId}`)
-    socket.to(sessId).emit('webrtc-answer', { answer })
+    console.log(`📞 Answer from ${userId} to ${targetUserId}`)
+    
+    const targetSocketId = userSocketMap.get(targetUserId)
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc-answer', { answer })
+    } else {
+      socket.to(sessId).emit('webrtc-answer', { answer })
+    }
   })
   
-  socket.on('webrtc-ice-candidate', ({ sessionId: sessId, candidate }) => {
+  // WebRTC signaling - ICE Candidate
+  socket.on('webrtc-ice-candidate', ({ sessionId: sessId, candidate, targetUserId }) => {
     if (sessId !== sessionId) return
-    socket.to(sessId).emit('webrtc-ice-candidate', { candidate })
+    
+    const targetSocketId = userSocketMap.get(targetUserId)
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc-ice-candidate', { candidate })
+    } else {
+      socket.to(sessId).emit('webrtc-ice-candidate', { candidate })
+    }
   })
   
-  socket.on('end-call', ({ sessionId: sessId }) => {
+  socket.on('end-call', ({ sessionId: sessId, targetUserId }) => {
     if (sessId !== sessionId) return
     console.log(`📞 Call ended by ${userId}`)
-    socket.to(sessId).emit('peer-ended-call')
+    
+    const targetSocketId = userSocketMap.get(targetUserId)
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('peer-ended-call')
+    } else {
+      socket.to(sessId).emit('peer-ended-call')
+    }
   })
   
   socket.on('disconnect', () => {
     console.log(`❌ User ${userId} disconnected`)
+    userSocketMap.delete(userId)
+    
     const sessionClients = sessions.get(sessionId)
     if (sessionClients) {
       sessionClients.delete(userId)
@@ -144,7 +185,8 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     yjs: 'running',
     socketio: 'running',
-    activeSessions: sessions.size
+    activeSessions: sessions.size,
+    activeUsers: userSocketMap.size
   })
 })
 
