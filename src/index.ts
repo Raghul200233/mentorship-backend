@@ -3,11 +3,14 @@ import cors from 'cors'
 import http from 'http'
 import { Server } from 'socket.io'
 import { WebSocketServer } from 'ws'
-import * as Y from 'yjs'
 import dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 import authRoutes from './routes/auth'
 import sessionRoutes from './routes/sessions'
+
+// y-websocket server utilities (CommonJS module)
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { setupWSConnection } = require('y-websocket/bin/utils')
 
 dotenv.config()
 
@@ -23,77 +26,30 @@ const io = new Server(server, {
   transports: ['websocket', 'polling']
 })
 
-// ── Yjs WebSocket Server (code sync) ──────────────────────────────────────────
-const yjsWss = new WebSocketServer({ server, path: '/yjs' })
+// ── Yjs WebSocket Server — uses y-websocket's official CRDT protocol ─────────
+// noServer:true lets us intercept only /yjs/* upgrade requests
+// so socket.io continues to handle /socket.io/* upgrades independently.
+const yjsWss = new WebSocketServer({ noServer: true })
 
-// documents keyed by sessionId
-const documents = new Map<string, Y.Doc>()
-// clients keyed by sessionId → Set of WebSockets
-const yjsClients = new Map<string, Set<any>>()
-
-yjsWss.on('connection', (ws, req) => {
-  const url = new URL(req.url!, `http://${req.headers.host}`)
-  const sessionId = url.searchParams.get('sessionId')
-
-  if (!sessionId) {
-    console.log('❌ Yjs: no sessionId — closing')
-    ws.close()
-    return
-  }
-
-  console.log(`📝 Yjs connected — session: ${sessionId}`)
-
-  // Register client under its sessionId
-  if (!yjsClients.has(sessionId)) yjsClients.set(sessionId, new Set())
-  yjsClients.get(sessionId)!.add(ws)
-
-  // Get or create doc
-  let doc = documents.get(sessionId)
-  if (!doc) {
-    doc = new Y.Doc()
-    documents.set(sessionId, doc)
-    console.log(`📄 New Yjs doc for session: ${sessionId}`)
-  }
-
-  // Send full current state to the new client
-  const initialUpdate = Y.encodeStateAsUpdate(doc)
-  ws.send(Buffer.from(initialUpdate))
-
-  ws.on('message', (data: Buffer) => {
-    try {
-      const update = new Uint8Array(data)
-      Y.applyUpdate(doc!, update)
-
-      // ✅ Broadcast ONLY to clients in the SAME session (not all Yjs clients)
-      const peers = yjsClients.get(sessionId)
-      if (peers) {
-        peers.forEach(client => {
-          if (client !== ws && client.readyState === 1) {
-            client.send(data)
-          }
-        })
-      }
-    } catch (err) {
-      console.error('Yjs update error:', err)
-    }
-  })
-
-  ws.on('close', () => {
-    console.log(`📝 Yjs disconnected — session: ${sessionId}`)
-    const peers = yjsClients.get(sessionId)
-    if (peers) {
-      peers.delete(ws)
-      if (peers.size === 0) {
-        yjsClients.delete(sessionId)
-        const d = documents.get(sessionId)
-        if (d) { d.destroy(); documents.delete(sessionId) }
-        console.log(`🗑️  Yjs doc cleaned up — session: ${sessionId}`)
-      }
-    }
-  })
+yjsWss.on('connection', (ws: any, req: any) => {
+  // setupWSConnection uses req.url to key the Y.Doc (one doc per unique path)
+  // e.g. /yjs/<sessionId> → doc name 'yjs/<sessionId>'
+  console.log(`📝 Yjs connected — ${req.url}`)
+  setupWSConnection(ws, req, { gc: true })
 })
 
-console.log('✅ Yjs WebSocket server ready on /yjs')
+// Route HTTP upgrade requests: /yjs/* → yjsWss, everything else → socket.io
+server.on('upgrade', (req: any, socket: any, head: any) => {
+  const pathname = req.url?.split('?')[0] ?? ''
+  if (pathname.startsWith('/yjs')) {
+    yjsWss.handleUpgrade(req, socket, head, (ws: any) => {
+      yjsWss.emit('connection', ws, req)
+    })
+  }
+  // socket.io manages its own upgrade listener for /socket.io/* paths
+})
+
+console.log('✅ Yjs WebSocket server ready on /yjs/<sessionId>')
 
 // ── Socket.io — chat & WebRTC signalling ─────────────────────────────────────
 const sessions = new Map<string, Set<string>>()
