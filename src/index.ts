@@ -23,122 +23,136 @@ const io = new Server(server, {
   transports: ['websocket', 'polling']
 })
 
-// Yjs WebSocket Server for code sync
+// ── Yjs WebSocket Server (code sync) ──────────────────────────────────────────
 const yjsWss = new WebSocketServer({ server, path: '/yjs' })
+
+// documents keyed by sessionId
 const documents = new Map<string, Y.Doc>()
+// clients keyed by sessionId → Set of WebSockets
+const yjsClients = new Map<string, Set<any>>()
 
 yjsWss.on('connection', (ws, req) => {
-  // Get sessionId from URL query parameter
   const url = new URL(req.url!, `http://${req.headers.host}`)
   const sessionId = url.searchParams.get('sessionId')
-  
+
   if (!sessionId) {
-    console.log('❌ No sessionId provided')
+    console.log('❌ Yjs: no sessionId — closing')
     ws.close()
     return
   }
-  
-  console.log(`📝 Yjs connected for session: ${sessionId}`)
-  
+
+  console.log(`📝 Yjs connected — session: ${sessionId}`)
+
+  // Register client under its sessionId
+  if (!yjsClients.has(sessionId)) yjsClients.set(sessionId, new Set())
+  yjsClients.get(sessionId)!.add(ws)
+
+  // Get or create doc
   let doc = documents.get(sessionId)
   if (!doc) {
     doc = new Y.Doc()
     documents.set(sessionId, doc)
-    console.log(`📄 Created new document for session: ${sessionId}`)
+    console.log(`📄 New Yjs doc for session: ${sessionId}`)
   }
-  
-  // Send initial state to client
-  const update = Y.encodeStateAsUpdate(doc)
-  ws.send(Buffer.from(update))
-  
+
+  // Send full current state to the new client
+  const initialUpdate = Y.encodeStateAsUpdate(doc)
+  ws.send(Buffer.from(initialUpdate))
+
   ws.on('message', (data: Buffer) => {
     try {
       const update = new Uint8Array(data)
       Y.applyUpdate(doc!, update)
-      
-      // Broadcast to all other clients
-      yjsWss.clients.forEach(client => {
-        if (client !== ws && client.readyState === 1) {
-          client.send(data)
-        }
-      })
+
+      // ✅ Broadcast ONLY to clients in the SAME session (not all Yjs clients)
+      const peers = yjsClients.get(sessionId)
+      if (peers) {
+        peers.forEach(client => {
+          if (client !== ws && client.readyState === 1) {
+            client.send(data)
+          }
+        })
+      }
     } catch (err) {
       console.error('Yjs update error:', err)
     }
   })
-  
+
   ws.on('close', () => {
-    console.log(`📝 Yjs disconnected for session: ${sessionId}`)
-    // Check if any clients remain for this session
-    let hasClients = false
-    yjsWss.clients.forEach(client => {
-      if (client !== ws && client.readyState === 1) {
-        const clientUrl = new URL((client as any).url, `http://${req.headers.host}`)
-        const clientSessionId = clientUrl.searchParams.get('sessionId')
-        if (clientSessionId === sessionId) {
-          hasClients = true
-        }
+    console.log(`📝 Yjs disconnected — session: ${sessionId}`)
+    const peers = yjsClients.get(sessionId)
+    if (peers) {
+      peers.delete(ws)
+      if (peers.size === 0) {
+        yjsClients.delete(sessionId)
+        const d = documents.get(sessionId)
+        if (d) { d.destroy(); documents.delete(sessionId) }
+        console.log(`🗑️  Yjs doc cleaned up — session: ${sessionId}`)
       }
-    })
-    if (!hasClients) {
-      documents.delete(sessionId)
-      console.log(`🗑️ Cleaned up document for session: ${sessionId}`)
     }
   })
 })
 
 console.log('✅ Yjs WebSocket server ready on /yjs')
 
-// Socket.io handlers for chat and video
-const sessions = new Map()
+// ── Socket.io — chat & WebRTC signalling ─────────────────────────────────────
+const sessions = new Map<string, Set<string>>()
 
 io.on('connection', (socket) => {
   const sessionId = socket.handshake.query.sessionId as string
-  const userId = socket.handshake.query.userId as string
-  
-  if (!sessionId || !userId) return
-  
-  console.log(`✅ User ${userId} connected to ${sessionId}`)
+  const userId    = socket.handshake.query.userId    as string
+
+  if (!sessionId || !userId) {
+    console.log('❌ Socket: missing sessionId or userId — closing')
+    socket.disconnect()
+    return
+  }
+
+  console.log(`✅ User ${userId} joined session ${sessionId}`)
   socket.join(sessionId)
-  
+
   if (!sessions.has(sessionId)) sessions.set(sessionId, new Set())
-  sessions.get(sessionId).add(userId)
+  sessions.get(sessionId)!.add(userId)
+
+  // Notify other users in the room
   socket.to(sessionId).emit('user-joined', { userId })
-  
-  // Chat
+
+  // ── Chat ─────────────────────────────────────────────────────────────────
   socket.on('chat-message', ({ message }) => {
-    console.log(`💬 ${message.text}`)
+    console.log(`💬 [${sessionId}] ${userId}: ${message?.text}`)
+    // Broadcast to everyone in the session room (including sender so they get confirmation)
     io.to(sessionId).emit('chat-message', message)
   })
-  
-  // WebRTC
+
+  // ── WebRTC signalling ─────────────────────────────────────────────────────
   socket.on('webrtc-offer', ({ offer }) => {
-    console.log(`📞 Offer from ${userId}`)
+    console.log(`📞 Offer: ${userId} → room ${sessionId}`)
     socket.to(sessionId).emit('webrtc-offer', { offer, fromUserId: userId })
   })
-  
+
   socket.on('webrtc-answer', ({ answer }) => {
-    console.log(`📞 Answer from ${userId}`)
+    console.log(`📞 Answer: ${userId} → room ${sessionId}`)
     socket.to(sessionId).emit('webrtc-answer', { answer })
   })
-  
+
   socket.on('webrtc-ice-candidate', ({ candidate }) => {
     socket.to(sessionId).emit('webrtc-ice-candidate', { candidate })
   })
-  
+
   socket.on('end-call', () => {
+    console.log(`📞 Call ended by ${userId}`)
     socket.to(sessionId).emit('peer-ended-call')
   })
-  
-  socket.on('disconnect', () => {
-    console.log(`❌ User ${userId} disconnected`)
+
+  socket.on('disconnect', (reason) => {
+    console.log(`❌ User ${userId} disconnected (${reason})`)
     sessions.get(sessionId)?.delete(userId)
-    if (sessions.get(sessionId)?.size === 0) sessions.delete(sessionId)
+    if ((sessions.get(sessionId)?.size ?? 0) === 0) sessions.delete(sessionId)
     socket.to(sessionId).emit('user-left', { userId })
   })
 })
 
-// Supabase
+// ── Supabase ──────────────────────────────────────────────────────────────────
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
@@ -149,13 +163,13 @@ app.use(express.json())
 app.use('/api/auth', authRoutes)
 app.use('/api/sessions', sessionRoutes)
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', yjs: 'running', socketio: 'running' })
 })
 
 const PORT = parseInt(process.env.PORT || '10000', 10)
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n✅ Server running on port ${PORT}`)
+  console.log(`\n✅ Server on port ${PORT}`)
   console.log(`📡 Socket.io ready`)
-  console.log(`🔗 Yjs WebSocket ready on ws://localhost:${PORT}/yjs?sessionId=xxx\n`)
+  console.log(`🔗 Yjs WS on ws://0.0.0.0:${PORT}/yjs?sessionId=xxx\n`)
 })
